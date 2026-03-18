@@ -119,8 +119,16 @@
                         <div class="voice-ring"></div>
                         <span class="material-symbols-rounded voice-mic-icon">mic</span>
                     </div>
-                    <p id="voice-status" class="voice-status">Kayıt başlatmak için mikrofona dokunun</p>
-                    <div id="voice-transcript" class="voice-transcript" contenteditable="false"></div>
+                    <p id="voice-status" class="voice-status">Ses kaydı başlatmak için butona dokunun</p>
+                    <p id="voice-timer" class="voice-timer hidden">00:00</p>
+                    <!-- Audio preview after recording -->
+                    <div id="voice-preview" class="voice-preview hidden">
+                        <audio id="voice-audio" controls class="voice-audio"></audio>
+                    </div>
+                    <!-- Optional short note for the recording -->
+                    <div id="voice-note-field" class="hidden" style="margin-top:12px;">
+                        <textarea id="voice-note-text" placeholder="Bu kayıt için kısa bir not ekleyin (isteğe bağlı)..." rows="2"></textarea>
+                    </div>
                     <div class="panel-actions">
                         <button id="btn-voice-start" class="btn btn-primary">
                             <span class="material-symbols-rounded">mic</span>

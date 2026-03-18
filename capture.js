@@ -10,8 +10,12 @@
         trip: null,       // { name, startDate, entries: [] }
         currentLocation: null,
         isRecording: false,
-        recognition: null,
-        currentTranscript: '',
+        mediaRecorder: null,
+        audioChunks: [],
+        audioBlob: null,
+        audioDataUrl: null,
+        recordingStartTime: null,
+        timerInterval: null,
     };
 
     // ── DOM References ──
@@ -43,7 +47,11 @@
         // Voice
         voiceVisualizer: $('#voice-visualizer'),
         voiceStatus: $('#voice-status'),
-        voiceTranscript: $('#voice-transcript'),
+        voiceTimer: $('#voice-timer'),
+        voicePreview: $('#voice-preview'),
+        voiceAudio: $('#voice-audio'),
+        voiceNoteField: $('#voice-note-field'),
+        voiceNoteText: $('#voice-note-text'),
         btnVoiceStart: $('#btn-voice-start'),
         btnVoiceStop: $('#btn-voice-stop'),
         btnVoiceSave: $('#btn-voice-save'),
@@ -218,147 +226,41 @@
         $(`#${panelId}`).classList.add('hidden');
         // Reset voice state
         if (panelId === 'voice-panel') {
-            stopRecognition();
-            state.currentTranscript = '';
-            dom.voiceTranscript.textContent = '';
-            dom.btnVoiceStart.classList.remove('hidden');
-            dom.btnVoiceStop.classList.add('hidden');
-            dom.btnVoiceSave.classList.add('hidden');
-            dom.voiceVisualizer.classList.remove('recording');
-            dom.voiceStatus.textContent = 'Kayıt başlatmak için mikrofona dokunun';
+            stopRecording();
+            resetVoiceUI();
         }
     }
 
-    // ── Speech Recognition ──
-    function initSpeechRecognition() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            console.warn('SpeechRecognition API not available');
-            // Don't fully disable - we'll show a message when the user tries
-            return;
-        }
-        // Just verify the API exists; we create a fresh instance each time on mobile
-        state.speechApiAvailable = true;
+    function resetVoiceUI() {
+        state.audioChunks = [];
+        state.audioBlob = null;
+        state.audioDataUrl = null;
+        dom.btnVoiceStart.classList.remove('hidden');
+        dom.btnVoiceStop.classList.add('hidden');
+        dom.btnVoiceSave.classList.add('hidden');
+        dom.voiceVisualizer.classList.remove('recording');
+        dom.voiceStatus.textContent = 'Ses kaydı başlatmak için butona dokunun';
+        dom.voiceTimer.classList.add('hidden');
+        dom.voiceTimer.textContent = '00:00';
+        dom.voicePreview.classList.add('hidden');
+        dom.voiceNoteField.classList.add('hidden');
+        dom.voiceNoteText.value = '';
+        dom.voiceAudio.src = '';
     }
 
-    function createRecognitionInstance() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) return null;
-
-        const recognition = new SpeechRecognition();
-        recognition.lang = 'tr-TR';
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.maxAlternatives = 1;
-
-        recognition.onresult = (event) => {
-            let interim = '';
-            let finalText = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcript = event.results[i][0].transcript;
-                if (event.results[i].isFinal) {
-                    finalText += transcript + ' ';
-                } else {
-                    interim = transcript;
-                }
-            }
-            if (finalText) {
-                state.currentTranscript += finalText;
-            }
-            dom.voiceTranscript.textContent = state.currentTranscript + (interim ? interim : '');
-            // Show interim text as status
-            if (interim) {
-                dom.voiceStatus.textContent = '🔴 Dinleniyor...';
-            }
-        };
-
-        recognition.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
-            switch (event.error) {
-                case 'not-allowed':
-                    showToast('Mikrofon izni verilmedi. Tarayıcı ayarlarından mikrofon iznini açın.', 'error');
-                    dom.voiceStatus.textContent = '⚠️ Mikrofon izni gerekli. Tarayıcı ayarlarından izin verin.';
-                    stopRecognitionUI();
-                    break;
-                case 'no-speech':
-                    // Silence timeout - auto restart if still recording
-                    if (state.isRecording) {
-                        dom.voiceStatus.textContent = '🔴 Ses algılanamadı, dinlemeye devam ediliyor...';
-                        try {
-                            recognition.stop();
-                        } catch { /* ignore */ }
-                    }
-                    break;
-                case 'network':
-                    showToast('İnternet bağlantısı gerekli (ses tanıma bulut tabanlıdır)', 'error');
-                    dom.voiceStatus.textContent = '⚠️ İnternet bağlantısı yok';
-                    stopRecognitionUI();
-                    break;
-                case 'audio-capture':
-                    showToast('Mikrofon bulunamadı veya kullanılamıyor', 'error');
-                    stopRecognitionUI();
-                    break;
-                case 'aborted':
-                    // Intentional stop, ignore
-                    break;
-                default:
-                    showToast('Ses tanıma hatası: ' + event.error, 'error');
-                    if (state.isRecording) {
-                        // Try to restart
-                        setTimeout(() => {
-                            if (state.isRecording) {
-                                try { startNewRecognitionSession(); } catch { stopRecognitionUI(); }
-                            }
-                        }, 500);
-                    }
-            }
-        };
-
-        recognition.onend = () => {
-            console.log('Recognition ended, isRecording:', state.isRecording);
-            if (state.isRecording) {
-                // Auto-restart with a fresh instance (mobile fix)
-                setTimeout(() => {
-                    if (state.isRecording) {
-                        startNewRecognitionSession();
-                    }
-                }, 300);
-            } else {
-                stopRecognitionUI();
-            }
-        };
-
-        return recognition;
+    // ── Audio Recording (MediaRecorder) ──
+    function formatTime(seconds) {
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = (seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
     }
 
-    function startNewRecognitionSession() {
-        // Create fresh instance each time (fixes mobile Chrome bugs)
-        if (state.recognition) {
-            try { state.recognition.stop(); } catch { /* ignore */ }
-            try { state.recognition.abort(); } catch { /* ignore */ }
-        }
-        state.recognition = createRecognitionInstance();
-        if (state.recognition) {
-            try {
-                state.recognition.start();
-                console.log('Recognition session started');
-            } catch (e) {
-                console.error('Failed to start recognition:', e);
-                showToast('Ses tanıma başlatılamadı', 'error');
-                stopRecognitionUI();
-            }
-        }
-    }
-
-    async function startRecognition() {
-        // First, explicitly request microphone permission via getUserMedia
-        // This is REQUIRED on mobile before SpeechRecognition works
+    async function startRecording() {
+        // Request microphone permission
+        let stream;
         try {
             dom.voiceStatus.textContent = 'Mikrofon izni isteniyor...';
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            // Stop the stream immediately - we just needed the permission
-            stream.getTracks().forEach(t => t.stop());
-            console.log('Microphone permission granted');
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (err) {
             console.error('Microphone permission denied:', err);
             showToast('Mikrofon izni verilmedi. Lütfen izin verin.', 'error');
@@ -366,56 +268,133 @@
             return;
         }
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            showToast('Bu tarayıcı sesli notu desteklemiyor. Chrome kullanmayı deneyin.', 'error');
-            dom.voiceStatus.textContent = '⚠️ Tarayıcınız sesli notu desteklemiyor';
+        // Determine best mime type
+        const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', ''];
+        let mimeType = '';
+        for (const mt of mimeTypes) {
+            if (!mt || MediaRecorder.isTypeSupported(mt)) {
+                mimeType = mt;
+                break;
+            }
+        }
+
+        state.audioChunks = [];
+        state.audioBlob = null;
+        state.audioDataUrl = null;
+
+        try {
+            const options = mimeType ? { mimeType } : {};
+            state.mediaRecorder = new MediaRecorder(stream, options);
+        } catch (err) {
+            console.error('MediaRecorder error:', err);
+            showToast('Ses kaydı başlatılamadı', 'error');
+            stream.getTracks().forEach(t => t.stop());
             return;
         }
 
+        state.mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                state.audioChunks.push(e.data);
+            }
+        };
+
+        state.mediaRecorder.onstop = () => {
+            // Stop all tracks
+            stream.getTracks().forEach(t => t.stop());
+
+            // Build blob
+            const actualMime = state.mediaRecorder.mimeType || 'audio/webm';
+            state.audioBlob = new Blob(state.audioChunks, { type: actualMime });
+
+            // Convert to dataUrl for storage
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                state.audioDataUrl = ev.target.result;
+                // Show preview
+                dom.voiceAudio.src = URL.createObjectURL(state.audioBlob);
+                dom.voicePreview.classList.remove('hidden');
+                dom.voiceNoteField.classList.remove('hidden');
+                dom.btnVoiceSave.classList.remove('hidden');
+                dom.voiceStatus.textContent = '✅ Kayıt tamamlandı. Dinleyip kaydedebilirsiniz.';
+            };
+            reader.readAsDataURL(state.audioBlob);
+        };
+
+        state.mediaRecorder.onerror = (e) => {
+            console.error('MediaRecorder error:', e);
+            showToast('Ses kaydı hatası', 'error');
+            stopRecording();
+        };
+
+        // Start recording
+        state.mediaRecorder.start(1000); // collect data every second
         state.isRecording = true;
-        state.currentTranscript = '';
-        dom.voiceTranscript.textContent = '';
+
+        // UI updates
         dom.voiceVisualizer.classList.add('recording');
-        dom.voiceStatus.textContent = '🔴 Dinleniyor... Konuşmaya başlayın';
+        dom.voiceStatus.textContent = '🔴 Kayıt yapılıyor... Konuşun';
+        dom.voiceTimer.classList.remove('hidden');
+        dom.voicePreview.classList.add('hidden');
+        dom.voiceNoteField.classList.add('hidden');
         dom.btnVoiceStart.classList.add('hidden');
         dom.btnVoiceStop.classList.remove('hidden');
         dom.btnVoiceSave.classList.add('hidden');
 
-        startNewRecognitionSession();
+        // Timer
+        state.recordingStartTime = Date.now();
+        state.timerInterval = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - state.recordingStartTime) / 1000);
+            dom.voiceTimer.textContent = formatTime(elapsed);
+        }, 1000);
     }
 
-    function stopRecognition() {
-        state.isRecording = false;
-        if (state.recognition) {
-            try { state.recognition.stop(); } catch { /* ignore */ }
-            try { state.recognition.abort(); } catch { /* ignore */ }
+    function stopRecording() {
+        if (state.timerInterval) {
+            clearInterval(state.timerInterval);
+            state.timerInterval = null;
         }
-        stopRecognitionUI();
-    }
-
-    function stopRecognitionUI() {
         state.isRecording = false;
         dom.voiceVisualizer.classList.remove('recording');
-        dom.voiceStatus.textContent = 'Kayıt durduruldu';
-        dom.btnVoiceStart.classList.remove('hidden');
         dom.btnVoiceStop.classList.add('hidden');
-        if (state.currentTranscript.trim()) {
-            dom.btnVoiceSave.classList.remove('hidden');
-            dom.voiceTranscript.contentEditable = 'true';
-            dom.voiceStatus.textContent = '✏️ Metni düzenleyip kaydedebilirsiniz';
+        dom.btnVoiceStart.classList.remove('hidden');
+
+        if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+            try {
+                state.mediaRecorder.stop();
+            } catch { /* ignore */ }
         }
     }
 
     function saveVoiceNote() {
-        const text = (dom.voiceTranscript.textContent || dom.voiceTranscript.innerText).trim();
-        if (!text) {
-            showToast('Kayıt boş', 'error');
+        if (!state.audioDataUrl) {
+            showToast('Ses kaydı bulunamadı', 'error');
             return;
         }
-        addEntry('voice', text);
+
+        const noteText = (dom.voiceNoteText.value || '').trim() || '🎤 Sesli not';
+        const duration = state.recordingStartTime
+            ? Math.floor((Date.now() - state.recordingStartTime) / 1000)
+            : 0;
+
+        // Determine file extension from mime
+        const mime = state.audioBlob ? state.audioBlob.type : 'audio/webm';
+        let ext = 'webm';
+        if (mime.includes('ogg')) ext = 'ogg';
+        else if (mime.includes('mp4')) ext = 'mp4';
+
+        const filename = `ses_${Date.now()}.${ext}`;
+
+        const mediaItem = {
+            type: 'audio',
+            filename: filename,
+            dataUrl: state.audioDataUrl,
+            duration: duration,
+            mimeType: mime,
+        };
+
+        addEntry('voice', noteText, [mediaItem]);
         closePanel('voice-panel');
-        showToast('Sesli not kaydedildi ✓', 'success');
+        showToast(`Sesli not kaydedildi (${formatTime(duration)}) ✓`, 'success');
     }
 
     // ── Text Note ──
@@ -536,8 +515,14 @@
 
             let mediaHtml = '';
             if (entry.media && entry.media.length > 0) {
-                mediaHtml = `<div class="note-media-strip">${entry.media.map((m, i) => {
-                    if (m.type === 'photo') {
+                const mediaItems = entry.media.map((m, i) => {
+                    if (m.type === 'audio') {
+                        const dur = m.duration ? ` (${Math.floor(m.duration/60).toString().padStart(2,'0')}:${(m.duration%60).toString().padStart(2,'0')})` : '';
+                        return `<div class="note-audio-player">
+                                    <audio src="${m.dataUrl}" controls preload="metadata" style="width:100%;height:36px;border-radius:8px;"></audio>
+                                    <small style="color:var(--text-secondary);font-size:0.75rem;">🎤 Ses kaydı${dur}</small>
+                                </div>`;
+                    } else if (m.type === 'photo') {
                         return `<img src="${m.dataUrl}" class="note-media-thumb" onclick="app.showMedia('${entry.id}', ${i})" alt="Fotoğraf">`;
                     } else {
                         return `<div class="media-thumb-container" onclick="app.showMedia('${entry.id}', ${i})">
@@ -545,7 +530,12 @@
                                   <span class="video-badge">▶</span>
                                 </div>`;
                     }
-                }).join('')}</div>`;
+                });
+                // Separate audio from visual media
+                const audioItems = mediaItems.filter((_, i) => entry.media[i].type === 'audio');
+                const visualItems = mediaItems.filter((_, i) => entry.media[i].type !== 'audio');
+                if (audioItems.length) mediaHtml += audioItems.join('');
+                if (visualItems.length) mediaHtml += `<div class="note-media-strip">${visualItems.join('')}</div>`;
             }
 
             return `
@@ -617,10 +607,15 @@
         const entry = state.trip.entries.find(e => e.id === entryId);
         if (!entry || !entry.media[mediaIndex]) return;
         const media = entry.media[mediaIndex];
-        dom.mediaModalTitle.textContent = media.type === 'photo' ? 'Fotoğraf' : 'Video';
-        if (media.type === 'photo') {
+
+        if (media.type === 'audio') {
+            dom.mediaModalTitle.textContent = 'Ses Kaydı';
+            dom.mediaModalBody.innerHTML = `<audio src="${media.dataUrl}" controls autoplay style="width:100%"></audio>`;
+        } else if (media.type === 'photo') {
+            dom.mediaModalTitle.textContent = 'Fotoğraf';
             dom.mediaModalBody.innerHTML = `<img src="${media.dataUrl}" alt="Fotoğraf">`;
         } else {
+            dom.mediaModalTitle.textContent = 'Video';
             dom.mediaModalBody.innerHTML = `<video src="${media.dataUrl}" controls autoplay></video>`;
         }
         dom.mediaModal.classList.remove('hidden');
@@ -774,8 +769,8 @@
         });
 
         // Voice
-        dom.btnVoiceStart.addEventListener('click', startRecognition);
-        dom.btnVoiceStop.addEventListener('click', stopRecognition);
+        dom.btnVoiceStart.addEventListener('click', startRecording);
+        dom.btnVoiceStop.addEventListener('click', stopRecording);
         dom.btnVoiceSave.addEventListener('click', saveVoiceNote);
 
         // Text
@@ -815,7 +810,6 @@
     // ── Init ──
     function init() {
         initTheme();
-        initSpeechRecognition();
         loadTrip();
         bindEvents();
     }
