@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Gezi Notlarım - Seyahat notlarınızı sesli, yazılı ve görsel olarak kaydedin">
+    <title>Gezi Notlarım</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0" rel="stylesheet">
+    <link rel="stylesheet" href="capture.css">
+</head>
+<body>
+    <!-- Splash / Header -->
+    <header id="app-header">
+        <div class="header-content">
+            <div class="logo-area">
+                <span class="material-symbols-rounded logo-icon">travel_explore</span>
+                <h1>Gezi Notlarım</h1>
+            </div>
+            <button id="btn-theme-toggle" class="icon-btn" title="Tema Değiştir">
+                <span class="material-symbols-rounded">dark_mode</span>
+            </button>
+        </div>
+    </header>
+
+    <main id="app-main">
+        <!-- Trip Setup Panel -->
+        <section id="trip-setup" class="card glass-card">
+            <div class="card-header">
+                <span class="material-symbols-rounded">flight_takeoff</span>
+                <h2>Yeni Gezi Başlat</h2>
+            </div>
+            <div class="card-body">
+                <div class="input-group">
+                    <label for="trip-name">Gezi Adı</label>
+                    <input type="text" id="trip-name" placeholder="Örn: Ankara → Çanakkale Gezisi" autocomplete="off">
+                </div>
+                <button id="btn-start-trip" class="btn btn-primary btn-lg">
+                    <span class="material-symbols-rounded">play_arrow</span>
+                    Geziyi Başlat
+                </button>
+            </div>
+        </section>
+
+        <!-- Active Trip Panel -->
+        <section id="trip-active" class="hidden">
+            <!-- Trip Status Bar -->
+            <div class="trip-status-bar glass-card">
+                <div class="trip-info">
+                    <span class="material-symbols-rounded pulse-icon">radio_button_checked</span>
+                    <div>
+                        <span id="active-trip-name" class="trip-name-label">Gezi</span>
+                        <span id="active-trip-stats" class="trip-stats">0 not · 0 medya</span>
+                    </div>
+                </div>
+                <div class="trip-actions">
+                    <button id="btn-export" class="icon-btn" title="Dışa Aktar">
+                        <span class="material-symbols-rounded">download</span>
+                    </button>
+                    <button id="btn-end-trip" class="icon-btn icon-btn-danger" title="Geziyi Bitir">
+                        <span class="material-symbols-rounded">stop_circle</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Location Bar -->
+            <div id="location-bar" class="location-bar glass-card">
+                <span class="material-symbols-rounded">location_on</span>
+                <span id="location-text">Konum alınıyor...</span>
+                <button id="btn-refresh-location" class="icon-btn-sm" title="Konumu Yenile">
+                    <span class="material-symbols-rounded">refresh</span>
+                </button>
+            </div>
+
+            <!-- Quick Action Buttons -->
+            <div class="quick-actions">
+                <button id="btn-voice-note" class="action-card glass-card">
+                    <div class="action-icon voice-icon">
+                        <span class="material-symbols-rounded">mic</span>
+                    </div>
+                    <span class="action-label">Sesli Not</span>
+                </button>
+                <button id="btn-text-note" class="action-card glass-card">
+                    <div class="action-icon text-icon">
+                        <span class="material-symbols-rounded">edit_note</span>
+                    </div>
+                    <span class="action-label">Yazılı Not</span>
+                </button>
+                <button id="btn-add-photo" class="action-card glass-card">
+                    <div class="action-icon photo-icon">
+                        <span class="material-symbols-rounded">photo_camera</span>
+                    </div>
+                    <span class="action-label">Fotoğraf</span>
+                </button>
+                <button id="btn-add-video" class="action-card glass-card">
+                    <div class="action-icon video-icon">
+                        <span class="material-symbols-rounded">videocam</span>
+                    </div>
+                    <span class="action-label">Video</span>
+                </button>
+            </div>
+
+            <!-- Voice Recording Panel -->
+            <div id="voice-panel" class="panel glass-card hidden">
+                <div class="panel-header">
+                    <h3>
+                        <span class="material-symbols-rounded">mic</span>
+                        Sesli Not
+                    </h3>
+                    <button class="icon-btn btn-close-panel" data-panel="voice-panel">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
+                <div class="panel-body">
+                    <div id="voice-visualizer" class="voice-visualizer">
+                        <div class="voice-ring"></div>
+                        <div class="voice-ring"></div>
+                        <div class="voice-ring"></div>
+                        <span class="material-symbols-rounded voice-mic-icon">mic</span>
+                    </div>
+                    <p id="voice-status" class="voice-status">Kayıt başlatmak için mikrofona dokunun</p>
+                    <div id="voice-transcript" class="voice-transcript" contenteditable="false"></div>
+                    <div class="panel-actions">
+                        <button id="btn-voice-start" class="btn btn-primary">
+                            <span class="material-symbols-rounded">mic</span>
+                            Kaydı Başlat
+                        </button>
+                        <button id="btn-voice-stop" class="btn btn-danger hidden">
+                            <span class="material-symbols-rounded">stop</span>
+                            Durdur
+                        </button>
+                        <button id="btn-voice-save" class="btn btn-success hidden">
+                            <span class="material-symbols-rounded">save</span>
+                            Kaydet
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Text Note Panel -->
+            <div id="text-panel" class="panel glass-card hidden">
+                <div class="panel-header">
+                    <h3>
+                        <span class="material-symbols-rounded">edit_note</span>
+                        Yazılı Not
+                    </h3>
+                    <button class="icon-btn btn-close-panel" data-panel="text-panel">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
+                <div class="panel-body">
+                    <textarea id="text-note-input" placeholder="Notunuzu yazın..." rows="5"></textarea>
+                    <div class="panel-actions">
+                        <button id="btn-text-save" class="btn btn-primary">
+                            <span class="material-symbols-rounded">save</span>
+                            Kaydet
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Media Attach (hidden input) -->
+            <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden-input">
+            <input type="file" id="video-input" accept="video/*" capture="environment" class="hidden-input">
+
+            <!-- Notes Timeline -->
+            <section id="notes-list" class="notes-section">
+                <div class="section-header">
+                    <h3>
+                        <span class="material-symbols-rounded">timeline</span>
+                        Notlar
+                    </h3>
+                    <span id="notes-count" class="badge">0</span>
+                </div>
+                <div id="notes-container" class="notes-container">
+                    <div class="empty-state">
+                        <span class="material-symbols-rounded">note_add</span>
+                        <p>Henüz not eklenmedi.<br>Yukarıdaki butonları kullanarak not ekleyin.</p>
+                    </div>
+                </div>
+            </section>
+        </section>
+
+        <!-- Export Modal -->
+        <div id="export-modal" class="modal-overlay hidden">
+            <div class="modal glass-card">
+                <div class="modal-header">
+                    <h3>
+                        <span class="material-symbols-rounded">download</span>
+                        Dışa Aktar
+                    </h3>
+                    <button class="icon-btn btn-close-modal">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-description">Gezi verilerinizi nasıl dışa aktarmak istersiniz?</p>
+                    <div class="export-options">
+                        <button id="btn-export-separate" class="export-option-card">
+                            <span class="material-symbols-rounded">folder_zip</span>
+                            <strong>Ayrı Dosyalar</strong>
+                            <small>JSON + Medya klasörü (önerilen)</small>
+                        </button>
+                        <button id="btn-export-embedded" class="export-option-card">
+                            <span class="material-symbols-rounded">file_present</span>
+                            <strong>Tek Dosya (Base64)</strong>
+                            <small>Tüm veriler tek JSON'da</small>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Media Preview Modal -->
+        <div id="media-modal" class="modal-overlay hidden">
+            <div class="modal glass-card modal-lg">
+                <div class="modal-header">
+                    <h3 id="media-modal-title">Medya Önizleme</h3>
+                    <button class="icon-btn btn-close-media-modal">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
+                <div id="media-modal-body" class="modal-body media-preview-body">
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="capture.js"></script>
+</body>
+</html>
