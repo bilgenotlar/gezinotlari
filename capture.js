@@ -233,76 +233,163 @@
     function initSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            dom.btnVoiceNote.disabled = true;
-            dom.btnVoiceNote.title = 'Tarayıcınız sesli notu desteklemiyor';
+            console.warn('SpeechRecognition API not available');
+            // Don't fully disable - we'll show a message when the user tries
             return;
         }
+        // Just verify the API exists; we create a fresh instance each time on mobile
+        state.speechApiAvailable = true;
+    }
+
+    function createRecognitionInstance() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) return null;
+
         const recognition = new SpeechRecognition();
         recognition.lang = 'tr-TR';
         recognition.continuous = true;
         recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
 
         recognition.onresult = (event) => {
             let interim = '';
-            let final = '';
+            let finalText = '';
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const transcript = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
-                    final += transcript + ' ';
+                    finalText += transcript + ' ';
                 } else {
                     interim = transcript;
                 }
             }
-            if (final) {
-                state.currentTranscript += final;
+            if (finalText) {
+                state.currentTranscript += finalText;
             }
             dom.voiceTranscript.textContent = state.currentTranscript + (interim ? interim : '');
+            // Show interim text as status
+            if (interim) {
+                dom.voiceStatus.textContent = '🔴 Dinleniyor...';
+            }
         };
 
         recognition.onerror = (event) => {
             console.error('Speech recognition error:', event.error);
-            if (event.error === 'not-allowed') {
-                showToast('Mikrofon izni gerekli', 'error');
-            } else if (event.error !== 'aborted') {
-                showToast('Ses tanıma hatası: ' + event.error, 'error');
+            switch (event.error) {
+                case 'not-allowed':
+                    showToast('Mikrofon izni verilmedi. Tarayıcı ayarlarından mikrofon iznini açın.', 'error');
+                    dom.voiceStatus.textContent = '⚠️ Mikrofon izni gerekli. Tarayıcı ayarlarından izin verin.';
+                    stopRecognitionUI();
+                    break;
+                case 'no-speech':
+                    // Silence timeout - auto restart if still recording
+                    if (state.isRecording) {
+                        dom.voiceStatus.textContent = '🔴 Ses algılanamadı, dinlemeye devam ediliyor...';
+                        try {
+                            recognition.stop();
+                        } catch { /* ignore */ }
+                    }
+                    break;
+                case 'network':
+                    showToast('İnternet bağlantısı gerekli (ses tanıma bulut tabanlıdır)', 'error');
+                    dom.voiceStatus.textContent = '⚠️ İnternet bağlantısı yok';
+                    stopRecognitionUI();
+                    break;
+                case 'audio-capture':
+                    showToast('Mikrofon bulunamadı veya kullanılamıyor', 'error');
+                    stopRecognitionUI();
+                    break;
+                case 'aborted':
+                    // Intentional stop, ignore
+                    break;
+                default:
+                    showToast('Ses tanıma hatası: ' + event.error, 'error');
+                    if (state.isRecording) {
+                        // Try to restart
+                        setTimeout(() => {
+                            if (state.isRecording) {
+                                try { startNewRecognitionSession(); } catch { stopRecognitionUI(); }
+                            }
+                        }, 500);
+                    }
             }
-            stopRecognitionUI();
         };
 
         recognition.onend = () => {
+            console.log('Recognition ended, isRecording:', state.isRecording);
             if (state.isRecording) {
-                // Auto-restart if still recording
-                try { recognition.start(); } catch { /* ignore */ }
+                // Auto-restart with a fresh instance (mobile fix)
+                setTimeout(() => {
+                    if (state.isRecording) {
+                        startNewRecognitionSession();
+                    }
+                }, 300);
             } else {
                 stopRecognitionUI();
             }
         };
 
-        state.recognition = recognition;
+        return recognition;
     }
 
-    function startRecognition() {
-        if (!state.recognition) {
-            showToast('Sesli not bu tarayıcıda desteklenmiyor', 'error');
+    function startNewRecognitionSession() {
+        // Create fresh instance each time (fixes mobile Chrome bugs)
+        if (state.recognition) {
+            try { state.recognition.stop(); } catch { /* ignore */ }
+            try { state.recognition.abort(); } catch { /* ignore */ }
+        }
+        state.recognition = createRecognitionInstance();
+        if (state.recognition) {
+            try {
+                state.recognition.start();
+                console.log('Recognition session started');
+            } catch (e) {
+                console.error('Failed to start recognition:', e);
+                showToast('Ses tanıma başlatılamadı', 'error');
+                stopRecognitionUI();
+            }
+        }
+    }
+
+    async function startRecognition() {
+        // First, explicitly request microphone permission via getUserMedia
+        // This is REQUIRED on mobile before SpeechRecognition works
+        try {
+            dom.voiceStatus.textContent = 'Mikrofon izni isteniyor...';
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // Stop the stream immediately - we just needed the permission
+            stream.getTracks().forEach(t => t.stop());
+            console.log('Microphone permission granted');
+        } catch (err) {
+            console.error('Microphone permission denied:', err);
+            showToast('Mikrofon izni verilmedi. Lütfen izin verin.', 'error');
+            dom.voiceStatus.textContent = '⚠️ Mikrofon izni reddedildi';
             return;
         }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            showToast('Bu tarayıcı sesli notu desteklemiyor. Chrome kullanmayı deneyin.', 'error');
+            dom.voiceStatus.textContent = '⚠️ Tarayıcınız sesli notu desteklemiyor';
+            return;
+        }
+
         state.isRecording = true;
         state.currentTranscript = '';
         dom.voiceTranscript.textContent = '';
-        try {
-            state.recognition.start();
-        } catch { /* ignore if already started */ }
         dom.voiceVisualizer.classList.add('recording');
-        dom.voiceStatus.textContent = 'Dinleniyor... Konuşmaya başlayın';
+        dom.voiceStatus.textContent = '🔴 Dinleniyor... Konuşmaya başlayın';
         dom.btnVoiceStart.classList.add('hidden');
         dom.btnVoiceStop.classList.remove('hidden');
         dom.btnVoiceSave.classList.add('hidden');
+
+        startNewRecognitionSession();
     }
 
     function stopRecognition() {
         state.isRecording = false;
         if (state.recognition) {
             try { state.recognition.stop(); } catch { /* ignore */ }
+            try { state.recognition.abort(); } catch { /* ignore */ }
         }
         stopRecognitionUI();
     }
@@ -316,7 +403,7 @@
         if (state.currentTranscript.trim()) {
             dom.btnVoiceSave.classList.remove('hidden');
             dom.voiceTranscript.contentEditable = 'true';
-            dom.voiceStatus.textContent = 'Metni düzenleyip kaydedebilirsiniz';
+            dom.voiceStatus.textContent = '✏️ Metni düzenleyip kaydedebilirsiniz';
         }
     }
 
