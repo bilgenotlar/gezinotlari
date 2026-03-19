@@ -95,7 +95,7 @@
             </div>
 
             <!-- Quick Action Buttons -->
-            <div class="quick-actions">
+            <div class="quick-actions" style="grid-template-columns: 1fr 1fr;">
                 <button id="btn-voice-note" class="action-card glass-card">
                     <div class="action-icon voice-icon">
                         <span class="material-symbols-rounded">mic</span>
@@ -107,18 +107,6 @@
                         <span class="material-symbols-rounded">edit_note</span>
                     </div>
                     <span class="action-label">Yazılı Not</span>
-                </button>
-                <button id="btn-add-photo" class="action-card glass-card">
-                    <div class="action-icon photo-icon">
-                        <span class="material-symbols-rounded">photo_camera</span>
-                    </div>
-                    <span class="action-label">Fotoğraf</span>
-                </button>
-                <button id="btn-add-video" class="action-card glass-card">
-                    <div class="action-icon video-icon">
-                        <span class="material-symbols-rounded">videocam</span>
-                    </div>
-                    <span class="action-label">Video</span>
                 </button>
             </div>
 
@@ -189,9 +177,7 @@
                 </div>
             </div>
 
-            <!-- Media Attach (hidden input) -->
-            <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden-input">
-            <input type="file" id="video-input" accept="video/*" capture="environment" class="hidden-input">
+            <!-- Hidden inputs -->
             <input type="file" id="import-input" accept=".json" class="hidden-input">
 
             <!-- Notes Timeline -->
@@ -242,19 +228,7 @@
             </div>
         </div>
 
-        <!-- Media Preview Modal -->
-        <div id="media-modal" class="modal-overlay hidden">
-            <div class="modal glass-card modal-lg">
-                <div class="modal-header">
-                    <h3 id="media-modal-title">Medya Önizleme</h3>
-                    <button class="icon-btn btn-close-media-modal">
-                        <span class="material-symbols-rounded">close</span>
-                    </button>
-                </div>
-                <div id="media-modal-body" class="modal-body media-preview-body">
-                </div>
-            </div>
-        </div>
+
     </main>
 
     <!-- Toast Container -->

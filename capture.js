@@ -65,9 +65,6 @@
         // Text
         textNoteInput: $('#text-note-input'),
         btnTextSave: $('#btn-text-save'),
-        // Media
-        photoInput: $('#photo-input'),
-        videoInput: $('#video-input'),
         // Notes
         notesContainer: $('#notes-container'),
         notesCount: $('#notes-count'),
@@ -75,9 +72,6 @@
         exportModal: $('#export-modal'),
         btnExportSeparate: $('#btn-export-separate'),
         btnExportEmbedded: $('#btn-export-embedded'),
-        mediaModal: $('#media-modal'),
-        mediaModalTitle: $('#media-modal-title'),
-        mediaModalBody: $('#media-modal-body'),
         // Theme
         btnThemeToggle: $('#btn-theme-toggle'),
         // Toast
@@ -614,116 +608,6 @@
         showToast('Not silindi', 'info');
     }
 
-    // ── Media Compression ──
-    function compressImage(file, maxSize) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = (event) => {
-                const img = new Image();
-                img.src = event.target.result;
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
-
-                    if (width > height) {
-                        if (width > maxSize) {
-                            height *= maxSize / width;
-                            width = maxSize;
-                        }
-                    } else {
-                        if (height > maxSize) {
-                            width *= maxSize / height;
-                            height = maxSize;
-                        }
-                    }
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.6)); // Compress to 60% quality JPEG
-                };
-                img.onerror = () => resolve(null);
-            };
-            reader.onerror = () => resolve(null);
-        });
-    }
-
-    // ── Media Handling ──
-    function handleMediaInput(inputElement, mediaType) {
-        inputElement.onchange = async (e) => {
-            const files = Array.from(e.target.files);
-            if (!files.length) return;
-
-            // Show temporary loading toast
-            const toastId = Math.random().toString();
-            showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} işleniyor, lütfen bekleyin...`, 'info');
-
-            const mediaItems = [];
-            for (const file of files) {
-                let dataUrl;
-                if (mediaType === 'photo') {
-                    dataUrl = await compressImage(file, 800); // 800px max dimensions
-                } else {
-                    if (file.size > 2 * 1024 * 1024) { // 2MB limit for videos due to localStorage limits
-                        showToast('Video çok büyük! Sadece 2MB altındaki videolar tarayıcıya eklenebilir.', 'error');
-                        inputElement.value = '';
-                        return;
-                    }
-                    const reader = new FileReader();
-                    dataUrl = await new Promise((resolve) => {
-                        reader.onload = (ev) => resolve(ev.target.result);
-                        reader.readAsDataURL(file);
-                    });
-                }
-                
-                if (!dataUrl) continue;
-
-                mediaItems.push({
-                    type: mediaType,
-                    filename: file.name,
-                    dataUrl: dataUrl,
-                    size: file.size,
-                });
-            }
-            
-            if (mediaItems.length === 0) return;
-
-            // If there is an existing last entry, add media to it
-            // Otherwise create a new entry with just media
-            if (state.trip.entries.length > 0) {
-                const lastEntry = state.trip.entries[0];
-                const timeDiff = Date.now() - new Date(lastEntry.timestamp).getTime();
-                // If last note was within 5 minutes, attach media to it
-                if (timeDiff < 5 * 60 * 1000) {
-                    const oldMedia = [...lastEntry.media];
-                    lastEntry.media = lastEntry.media.concat(mediaItems);
-                    if (state.currentLocation) {
-                        lastEntry.location = { ...state.currentLocation };
-                    }
-                    try {
-                        saveTrips();
-                        updateStats();
-                        renderNotes();
-                        showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} son nota eklendi ✓`, 'success');
-                    } catch (err) {
-                        lastEntry.media = oldMedia; // Revert
-                    }
-                    inputElement.value = '';
-                    return;
-                }
-            }
-
-            // Create new entry with media
-            const added = addEntry('text', `📸 ${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} eklendi`, mediaItems);
-            if (added) {
-                showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} kaydedildi ✓`, 'success');
-            }
-            inputElement.value = '';
-        };
-    }
-
     // ── Render Notes ──
     function renderNotes() {
         if (!state.trip || state.trip.entries.length === 0) {
@@ -761,11 +645,10 @@
                                     <small style="color:var(--text-secondary);font-size:0.75rem;">🎤 Ses kaydı${dur}</small>
                                 </div>`;
                     } else if (m.type === 'photo') {
-                        return `<img src="${m.dataUrl}" class="note-media-thumb" onclick="app.showMedia('${entry.id}', ${i})" alt="Fotoğraf">`;
+                        return `<img src="${m.dataUrl}" class="note-media-thumb" style="cursor:default;" alt="Fotoğraf">`;
                     } else {
-                        return `<div class="media-thumb-container" onclick="app.showMedia('${entry.id}', ${i})">
-                                  <video src="${m.dataUrl}" class="note-media-thumb" muted></video>
-                                  <span class="video-badge">▶</span>
+                        return `<div class="media-thumb-container" style="cursor:default;">
+                                  <video src="${m.dataUrl}" class="note-media-thumb" controls></video>
                                 </div>`;
                     }
                 });
@@ -789,10 +672,6 @@
                     ${locationHtml}
                     ${mediaHtml}
                     <div class="note-card-actions">
-                        <button onclick="app.addMediaToEntry('${entry.id}', 'photo')">
-                            <span class="material-symbols-rounded" style="font-size:16px">add_photo_alternate</span>
-                            Fotoğraf Ekle
-                        </button>
                         <button class="btn-delete" onclick="app.deleteEntry('${entry.id}')">
                             <span class="material-symbols-rounded" style="font-size:16px">delete</span>
                             Sil
@@ -802,83 +681,6 @@
         }).join('');
     }
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    // ── Add media to specific entry ──
-    function addMediaToEntry(entryId, mediaType) {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = mediaType === 'photo' ? 'image/*' : 'video/*';
-        input.capture = 'environment';
-        input.onchange = async (e) => {
-            const files = Array.from(e.target.files);
-            if (!files.length) return;
-            const entry = state.trip.entries.find(en => en.id === entryId);
-            if (!entry) return;
-            
-            showToast('Medya işleniyor...', 'info');
-            const oldMedia = [...entry.media];
-            
-            for (const file of files) {
-                let dataUrl;
-                if (mediaType === 'photo') {
-                    dataUrl = await compressImage(file, 800);
-                } else {
-                    if (file.size > 2 * 1024 * 1024) {
-                        showToast('Video çok büyük! (Max 2MB)', 'error');
-                        input.value = '';
-                        return;
-                    }
-                    const reader = new FileReader();
-                    dataUrl = await new Promise((resolve) => {
-                        reader.onload = (ev) => resolve(ev.target.result);
-                        reader.readAsDataURL(file);
-                    });
-                }
-                if (!dataUrl) continue;
-                
-                entry.media.push({
-                    type: mediaType,
-                    filename: file.name,
-                    dataUrl: dataUrl,
-                    size: file.size,
-                });
-            }
-            try {
-                saveTrips();
-                updateStats();
-                renderNotes();
-                showToast('Medya eklendi ✓', 'success');
-            } catch (err) {
-                entry.media = oldMedia; // Revert
-            }
-        };
-        input.click();
-    }
-
-    // ── Show Media Modal ──
-    function showMedia(entryId, mediaIndex) {
-        const entry = state.trip.entries.find(e => e.id === entryId);
-        if (!entry || !entry.media[mediaIndex]) return;
-        const media = entry.media[mediaIndex];
-
-        if (media.type === 'audio') {
-            dom.mediaModalTitle.textContent = 'Ses Kaydı';
-            dom.mediaModalBody.innerHTML = `<audio src="${media.dataUrl}" controls autoplay style="width:100%"></audio>`;
-        } else if (media.type === 'photo') {
-            dom.mediaModalTitle.textContent = 'Fotoğraf';
-            dom.mediaModalBody.innerHTML = `<img src="${media.dataUrl}" alt="Fotoğraf">`;
-        } else {
-            dom.mediaModalTitle.textContent = 'Video';
-            dom.mediaModalBody.innerHTML = `<video src="${media.dataUrl}" controls autoplay></video>`;
-        }
-        dom.mediaModal.classList.remove('hidden');
-    }
-
     // ── Export ──
     function showExportModal() {
         dom.exportModal.classList.remove('hidden');
@@ -886,14 +688,6 @@
 
     function closeExportModal() {
         dom.exportModal.classList.add('hidden');
-    }
-
-    function closeMediaModal() {
-        dom.mediaModal.classList.remove('hidden');
-        dom.mediaModal.classList.add('hidden');
-        // Stop any playing video
-        const video = dom.mediaModalBody.querySelector('video');
-        if (video) video.pause();
     }
 
     async function exportSeparate() {
@@ -1037,12 +831,6 @@
         // Text
         dom.btnTextSave.addEventListener('click', saveTextNote);
 
-        // Media
-        dom.btnAddPhoto.addEventListener('click', () => dom.photoInput.click());
-        dom.btnAddVideo.addEventListener('click', () => dom.videoInput.click());
-        handleMediaInput(dom.photoInput, 'photo');
-        handleMediaInput(dom.videoInput, 'video');
-
         // Export
         dom.btnExport.addEventListener('click', showExportModal);
         dom.btnExportSeparate.addEventListener('click', exportSeparate);
@@ -1050,14 +838,10 @@
 
         // Close modals
         $('.btn-close-modal').addEventListener('click', closeExportModal);
-        $('.btn-close-media-modal').addEventListener('click', closeMediaModal);
 
         // Close modal on overlay click
         dom.exportModal.addEventListener('click', (e) => {
             if (e.target === dom.exportModal) closeExportModal();
-        });
-        dom.mediaModal.addEventListener('click', (e) => {
-            if (e.target === dom.mediaModal) closeMediaModal();
         });
     }
 
