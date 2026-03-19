@@ -27,13 +27,29 @@
     <main id="app-main">
         <!-- Trip Setup Panel -->
         <section id="trip-setup" class="card glass-card">
-            <div class="card-header">
-                <span class="material-symbols-rounded">flight_takeoff</span>
-                <h2>Yeni Gezi Başlat</h2>
+            <div class="card-header" style="justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="material-symbols-rounded">flight_takeoff</span>
+                    <h2>Gezi Yönetimi</h2>
+                </div>
+                <button id="btn-import-trip" class="icon-btn-sm" title="İçe Aktar (JSON)">
+                    <span class="material-symbols-rounded">upload_file</span>
+                </button>
             </div>
+            
             <div class="card-body">
+                <!-- Existing Trips List -->
+                <div id="existing-trips" class="existing-trips hidden">
+                    <h3 style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 8px;">Mevcut Geziler</h3>
+                    <div id="trips-list" class="trips-list">
+                        <!-- Trips will be rendered here -->
+                    </div>
+                </div>
+
+                <div class="divider" style="height: 1px; background: var(--border-glass); margin: 16px 0;"></div>
+
                 <div class="input-group">
-                    <label for="trip-name">Gezi Adı</label>
+                    <label for="trip-name">Yeni Gezi Başlat</label>
                     <input type="text" id="trip-name" placeholder="Örn: Ankara → Çanakkale Gezisi" autocomplete="off">
                 </div>
                 <button id="btn-start-trip" class="btn btn-primary btn-lg">
@@ -50,7 +66,12 @@
                 <div class="trip-info">
                     <span class="material-symbols-rounded pulse-icon">radio_button_checked</span>
                     <div>
-                        <span id="active-trip-name" class="trip-name-label">Gezi</span>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <span id="active-trip-name" class="trip-name-label">Gezi</span>
+                            <button id="btn-edit-trip-name" class="icon-btn-sm" title="Gezi Adını Düzenle" style="width:24px;height:24px;">
+                                <span class="material-symbols-rounded" style="font-size:16px;">edit</span>
+                            </button>
+                        </div>
                         <span id="active-trip-stats" class="trip-stats">0 not · 0 medya</span>
                     </div>
                 </div>
@@ -171,6 +192,7 @@
             <!-- Media Attach (hidden input) -->
             <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden-input">
             <input type="file" id="video-input" accept="video/*" capture="environment" class="hidden-input">
+            <input type="file" id="import-input" accept=".json" class="hidden-input">
 
             <!-- Notes Timeline -->
             <section id="notes-list" class="notes-section">

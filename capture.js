@@ -7,7 +7,9 @@
 
     // ── State ──
     const state = {
-        trip: null,       // { name, startDate, entries: [] }
+        trips: [],        // Array of all trips
+        activeTripId: null, // ID of the current active trip
+        trip: null,       // Reference to the active trip object { id, name, startDate, entries: [] }
         currentLocation: null,
         isRecording: false,
         mediaRecorder: null,
@@ -27,10 +29,15 @@
         tripSetup: $('#trip-setup'),
         tripActive: $('#trip-active'),
         // Trip setup
+        existingTrips: $('#existing-trips'),
+        tripsList: $('#trips-list'),
+        btnImportTrip: $('#btn-import-trip'),
+        importInput: $('#import-input'),
         tripNameInput: $('#trip-name'),
         btnStartTrip: $('#btn-start-trip'),
         // Active trip
         activeTripName: $('#active-trip-name'),
+        btnEditTripName: $('#btn-edit-trip-name'),
         activeTripStats: $('#active-trip-stats'),
         locationText: $('#location-text'),
         btnRefreshLocation: $('#btn-refresh-location'),
@@ -149,22 +156,107 @@
     }
 
     // ── Trip Management ──
-    function loadTrip() {
-        const saved = localStorage.getItem('gezi-current-trip');
-        if (saved) {
+    function loadAllTrips() {
+        // Migration from old single-trip system
+        const oldTrip = localStorage.getItem('gezi-current-trip');
+        if (oldTrip) {
             try {
-                state.trip = JSON.parse(saved);
-                showTripActive();
+                const parsed = JSON.parse(oldTrip);
+                parsed.id = parsed.id || 'trip_' + Date.now();
+                localStorage.setItem('gezi-trips', JSON.stringify([parsed]));
+                localStorage.setItem('gezi-active-trip-id', parsed.id);
+                localStorage.removeItem('gezi-current-trip');
             } catch {
                 localStorage.removeItem('gezi-current-trip');
             }
         }
+
+        const savedTrips = localStorage.getItem('gezi-trips');
+        if (savedTrips) {
+            try {
+                state.trips = JSON.parse(savedTrips);
+            } catch {
+                state.trips = [];
+            }
+        } else {
+            state.trips = [];
+        }
+
+        renderTripsList();
+
+        const activeId = localStorage.getItem('gezi-active-trip-id');
+        if (activeId) {
+            const found = state.trips.find(t => t.id === activeId);
+            if (found) {
+                state.activeTripId = activeId;
+                state.trip = found;
+                showTripActive();
+            } else {
+                localStorage.removeItem('gezi-active-trip-id');
+                showTripSetup();
+            }
+        } else {
+            showTripSetup();
+        }
     }
 
-    function saveTrip() {
-        if (state.trip) {
-            localStorage.setItem('gezi-current-trip', JSON.stringify(state.trip));
+    function renderTripsList() {
+        if (state.trips.length === 0) {
+            dom.existingTrips.classList.add('hidden');
+            return;
         }
+        dom.existingTrips.classList.remove('hidden');
+        
+        // Sort by start date descending
+        const sorted = [...state.trips].sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+        
+        dom.tripsList.innerHTML = sorted.map(t => {
+            const date = new Date(t.startDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' });
+            const noteCount = t.entries ? t.entries.length : 0;
+            return `
+                <div class="trip-list-item" style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg-card); border-radius:var(--radius-md); margin-bottom:8px; border:1px solid var(--border-glass);">
+                    <div style="flex:1; cursor:pointer;" onclick="app.resumeTrip('${t.id}')">
+                        <h4 style="margin:0; font-size:1rem; font-weight:600; color:var(--text-primary);">${t.name}</h4>
+                        <span style="font-size:0.8rem; color:var(--text-secondary);">${date} · ${noteCount} not</span>
+                    </div>
+                    <button class="icon-btn-sm" style="color:var(--accent-red);" onclick="app.deleteTrip('${t.id}')" title="Geziyi Sil">
+                        <span class="material-symbols-rounded">delete</span>
+                    </button>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function saveTrips() {
+        localStorage.setItem('gezi-trips', JSON.stringify(state.trips));
+        if (state.activeTripId) {
+            localStorage.setItem('gezi-active-trip-id', state.activeTripId);
+        } else {
+            localStorage.removeItem('gezi-active-trip-id');
+        }
+    }
+
+    function resumeTrip(id) {
+        const found = state.trips.find(t => t.id === id);
+        if (found) {
+            state.activeTripId = id;
+            state.trip = found;
+            saveTrips();
+            showTripActive();
+        }
+    }
+
+    function deleteTrip(id) {
+        if (!confirm('Bu geziyi ve içindeki tüm notları silmek istediğinize emin misiniz? Bu işlem geri alınamaz!')) return;
+        state.trips = state.trips.filter(t => t.id !== id);
+        if (state.activeTripId === id) {
+            state.activeTripId = null;
+            state.trip = null;
+            showTripSetup();
+        }
+        saveTrips();
+        renderTripsList();
+        showToast('Gezi silindi', 'info');
     }
 
     function startTrip() {
@@ -174,22 +266,87 @@
             dom.tripNameInput.focus();
             return;
         }
-        state.trip = {
+        const newTrip = {
+            id: 'trip_' + Date.now(),
             name: name,
             startDate: new Date().toISOString(),
             entries: [],
         };
-        saveTrip();
+        state.trips.unshift(newTrip);
+        state.activeTripId = newTrip.id;
+        state.trip = newTrip;
+        
+        saveTrips();
         showTripActive();
+        dom.tripNameInput.value = '';
         showToast('Gezi başlatıldı! İyi yolculuklar 🧳', 'success');
     }
 
     function endTrip() {
         if (!state.trip) return;
-        if (state.trip.entries.length > 0 && !confirm('Geziyi bitirmek istediğinize emin misiniz? Veriler silinmeyecek, dışa aktarabilirsiniz.')) return;
         state.trip.endDate = new Date().toISOString();
-        saveTrip();
-        showToast('Gezi tamamlandı!', 'success');
+        state.activeTripId = null; // Deactivate
+        state.trip = null;
+        saveTrips();
+        showTripSetup();
+        renderTripsList();
+        showToast('Gezi kapatıldı!', 'success');
+    }
+
+    function editTripName() {
+        if (!state.trip) return;
+        const newName = prompt('Gezi adını düzenleyin:', state.trip.name);
+        if (newName !== null && newName.trim() !== '') {
+            state.trip.name = newName.trim();
+            dom.activeTripName.textContent = state.trip.name;
+            saveTrips();
+            renderTripsList();
+            showToast('Gezi adı güncellendi', 'success');
+        }
+    }
+
+    function handleImportIconClick() {
+        dom.importInput.click();
+    }
+
+    function handleImportFile(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const data = JSON.parse(ev.target.result);
+                if (!data.tripName || !data.entries) {
+                    showToast('Geçersiz dosya formatı', 'error');
+                    return;
+                }
+                
+                const newTrip = {
+                    id: 'trip_' + Date.now(),
+                    name: data.tripName + ' (İçe Aktarıldı)',
+                    startDate: data.startDate || new Date().toISOString(),
+                    endDate: data.endDate,
+                    entries: data.entries || []
+                };
+                
+                state.trips.unshift(newTrip);
+                saveTrips();
+                renderTripsList();
+                showToast('Gezi başarıyla içe aktarıldı ✓', 'success');
+            } catch (err) {
+                console.error(err);
+                showToast('Dosya okunamadı', 'error');
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = ''; // Reset input
+    }
+
+    function showTripSetup() {
+        dom.tripActive.classList.add('hidden');
+        dom.tripSetup.classList.remove('hidden');
+        renderTripsList();
     }
 
     function showTripActive() {
@@ -422,7 +579,7 @@
             media: media,
         };
         state.trip.entries.unshift(entry); // newest first
-        saveTrip();
+        saveTrips();
         updateStats();
         renderNotes();
         return entry;
@@ -431,7 +588,7 @@
     function deleteEntry(entryId) {
         if (!confirm('Bu notu silmek istediğinize emin misiniz?')) return;
         state.trip.entries = state.trip.entries.filter(e => e.id !== entryId);
-        saveTrip();
+        saveTrips();
         updateStats();
         renderNotes();
         showToast('Not silindi', 'info');
@@ -470,7 +627,7 @@
                     if (state.currentLocation) {
                         lastEntry.location = { ...state.currentLocation };
                     }
-                    saveTrip();
+                    saveTrips();
                     updateStats();
                     renderNotes();
                     showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} son nota eklendi ✓`, 'success');
@@ -594,7 +751,7 @@
                     size: file.size,
                 });
             }
-            saveTrip();
+            saveTrips();
             updateStats();
             renderNotes();
             showToast('Medya eklendi ✓', 'success');
@@ -752,6 +909,9 @@
         // Trip
         dom.btnStartTrip.addEventListener('click', startTrip);
         dom.btnEndTrip.addEventListener('click', endTrip);
+        dom.btnEditTripName.addEventListener('click', editTripName);
+        dom.btnImportTrip.addEventListener('click', handleImportIconClick);
+        dom.importInput.addEventListener('change', handleImportFile);
         dom.tripNameInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') startTrip();
         });
@@ -805,12 +965,14 @@
         deleteEntry,
         addMediaToEntry,
         showMedia,
+        resumeTrip,
+        deleteTrip,
     };
 
     // ── Init ──
     function init() {
         initTheme();
-        loadTrip();
+        loadAllTrips();
         bindEvents();
     }
 
