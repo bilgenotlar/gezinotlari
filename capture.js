@@ -796,6 +796,12 @@
         return name.replace(/[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ\s_-]/g, '').replace(/\s+/g, '_').substring(0, 50);
     }
 
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+
     // ── Event Bindings ──
     function bindEvents() {
         // Theme
