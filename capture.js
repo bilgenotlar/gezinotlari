@@ -559,9 +559,11 @@
             mimeType: mime,
         };
 
-        addEntry('voice', noteText, [mediaItem]);
-        closePanel('voice-panel');
-        showToast(`Sesli not kaydedildi (${formatTime(duration)}) ✓`, 'success');
+        const added = addEntry('voice', noteText, [mediaItem]);
+        if (added) {
+            closePanel('voice-panel');
+            showToast(`Sesli not kaydedildi (${formatTime(duration)}) ✓`, 'success');
+        }
     }
 
     // ── Text Note ──
@@ -572,10 +574,12 @@
             dom.textNoteInput.focus();
             return;
         }
-        addEntry('text', text);
-        dom.textNoteInput.value = '';
-        closePanel('text-panel');
-        showToast('Yazılı not kaydedildi ✓', 'success');
+        const added = addEntry('text', text);
+        if (added) {
+            dom.textNoteInput.value = '';
+            closePanel('text-panel');
+            showToast('Yazılı not kaydedildi ✓', 'success');
+        }
     }
 
     // ── Entry Management ──
