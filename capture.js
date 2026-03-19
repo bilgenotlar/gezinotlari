@@ -228,11 +228,21 @@
     }
 
     function saveTrips() {
-        localStorage.setItem('gezi-trips', JSON.stringify(state.trips));
-        if (state.activeTripId) {
-            localStorage.setItem('gezi-active-trip-id', state.activeTripId);
-        } else {
-            localStorage.removeItem('gezi-active-trip-id');
+        try {
+            localStorage.setItem('gezi-trips', JSON.stringify(state.trips));
+            if (state.activeTripId) {
+                localStorage.setItem('gezi-active-trip-id', state.activeTripId);
+            } else {
+                localStorage.removeItem('gezi-active-trip-id');
+            }
+        } catch (err) {
+            console.error('Storage quota error:', err);
+            if (err.name === 'QuotaExceededError' || err.code === 22 || err.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+                showToast('HATA: Tarayıcı hafızası doldu! (Max 5MB). Lütfen eski gezileri veya medyaları silin.', 'error');
+            } else {
+                showToast('HATA: Gezi verisi kaydedilemedi.', 'error');
+            }
+            throw err;
         }
     }
 
@@ -579,10 +589,16 @@
             media: media,
         };
         state.trip.entries.unshift(entry); // newest first
-        saveTrips();
-        updateStats();
-        renderNotes();
-        return entry;
+        try {
+            saveTrips();
+            updateStats();
+            renderNotes();
+            return entry;
+        } catch (err) {
+            // Revert memory state
+            state.trip.entries.shift();
+            return null;
+        }
     }
 
     function deleteEntry(entryId) {
@@ -594,19 +610,72 @@
         showToast('Not silindi', 'info');
     }
 
+    // ── Media Compression ──
+    function compressImage(file, maxSize) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > maxSize) {
+                            height *= maxSize / width;
+                            width = maxSize;
+                        }
+                    } else {
+                        if (height > maxSize) {
+                            width *= maxSize / height;
+                            height = maxSize;
+                        }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.6)); // Compress to 60% quality JPEG
+                };
+                img.onerror = () => resolve(null);
+            };
+            reader.onerror = () => resolve(null);
+        });
+    }
+
     // ── Media Handling ──
     function handleMediaInput(inputElement, mediaType) {
         inputElement.onchange = async (e) => {
             const files = Array.from(e.target.files);
             if (!files.length) return;
 
+            // Show temporary loading toast
+            const toastId = Math.random().toString();
+            showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} işleniyor, lütfen bekleyin...`, 'info');
+
             const mediaItems = [];
             for (const file of files) {
-                const reader = new FileReader();
-                const dataUrl = await new Promise((resolve) => {
-                    reader.onload = (ev) => resolve(ev.target.result);
-                    reader.readAsDataURL(file);
-                });
+                let dataUrl;
+                if (mediaType === 'photo') {
+                    dataUrl = await compressImage(file, 800); // 800px max dimensions
+                } else {
+                    if (file.size > 2 * 1024 * 1024) { // 2MB limit for videos due to localStorage limits
+                        showToast('Video çok büyük! Sadece 2MB altındaki videolar tarayıcıya eklenebilir.', 'error');
+                        inputElement.value = '';
+                        return;
+                    }
+                    const reader = new FileReader();
+                    dataUrl = await new Promise((resolve) => {
+                        reader.onload = (ev) => resolve(ev.target.result);
+                        reader.readAsDataURL(file);
+                    });
+                }
+                
+                if (!dataUrl) continue;
+
                 mediaItems.push({
                     type: mediaType,
                     filename: file.name,
@@ -614,6 +683,8 @@
                     size: file.size,
                 });
             }
+            
+            if (mediaItems.length === 0) return;
 
             // If there is an existing last entry, add media to it
             // Otherwise create a new entry with just media
@@ -622,23 +693,29 @@
                 const timeDiff = Date.now() - new Date(lastEntry.timestamp).getTime();
                 // If last note was within 5 minutes, attach media to it
                 if (timeDiff < 5 * 60 * 1000) {
+                    const oldMedia = [...lastEntry.media];
                     lastEntry.media = lastEntry.media.concat(mediaItems);
-                    // Update location to latest
                     if (state.currentLocation) {
                         lastEntry.location = { ...state.currentLocation };
                     }
-                    saveTrips();
-                    updateStats();
-                    renderNotes();
-                    showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} son nota eklendi ✓`, 'success');
+                    try {
+                        saveTrips();
+                        updateStats();
+                        renderNotes();
+                        showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} son nota eklendi ✓`, 'success');
+                    } catch (err) {
+                        lastEntry.media = oldMedia; // Revert
+                    }
                     inputElement.value = '';
                     return;
                 }
             }
 
             // Create new entry with media
-            addEntry('text', `📸 ${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} eklendi`, mediaItems);
-            showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} kaydedildi ✓`, 'success');
+            const added = addEntry('text', `📸 ${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} eklendi`, mediaItems);
+            if (added) {
+                showToast(`${mediaType === 'photo' ? 'Fotoğraf' : 'Video'} kaydedildi ✓`, 'success');
+            }
             inputElement.value = '';
         };
     }
@@ -738,12 +815,28 @@
             if (!files.length) return;
             const entry = state.trip.entries.find(en => en.id === entryId);
             if (!entry) return;
+            
+            showToast('Medya işleniyor...', 'info');
+            const oldMedia = [...entry.media];
+            
             for (const file of files) {
-                const reader = new FileReader();
-                const dataUrl = await new Promise((resolve) => {
-                    reader.onload = (ev) => resolve(ev.target.result);
-                    reader.readAsDataURL(file);
-                });
+                let dataUrl;
+                if (mediaType === 'photo') {
+                    dataUrl = await compressImage(file, 800);
+                } else {
+                    if (file.size > 2 * 1024 * 1024) {
+                        showToast('Video çok büyük! (Max 2MB)', 'error');
+                        input.value = '';
+                        return;
+                    }
+                    const reader = new FileReader();
+                    dataUrl = await new Promise((resolve) => {
+                        reader.onload = (ev) => resolve(ev.target.result);
+                        reader.readAsDataURL(file);
+                    });
+                }
+                if (!dataUrl) continue;
+                
                 entry.media.push({
                     type: mediaType,
                     filename: file.name,
@@ -751,10 +844,14 @@
                     size: file.size,
                 });
             }
-            saveTrips();
-            updateStats();
-            renderNotes();
-            showToast('Medya eklendi ✓', 'success');
+            try {
+                saveTrips();
+                updateStats();
+                renderNotes();
+                showToast('Medya eklendi ✓', 'success');
+            } catch (err) {
+                entry.media = oldMedia; // Revert
+            }
         };
         input.click();
     }
