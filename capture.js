@@ -848,8 +848,6 @@
     // ── Public API (for inline onclick handlers) ──
     window.app = {
         deleteEntry,
-        addMediaToEntry,
-        showMedia,
         resumeTrip,
         deleteTrip,
     };
