@@ -488,7 +488,7 @@
                 audio: {
                     echoCancellation: false,
                     noiseSuppression: false,
-                    autoGainControl: false,
+                    autoGainControl: true, // Sesi mikrofona çok yakınmış gibi hissettirmemesi için kazanç kontrolünü geri açıyoruz
                     channelCount: 1, // Mono kayıt
                     sampleRate: 44100
                 }
