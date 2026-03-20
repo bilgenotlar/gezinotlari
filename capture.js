@@ -20,6 +20,57 @@
         timerInterval: null,
     };
 
+    // ── Database ──
+    const db = {
+        name: 'GeziMobileDB',
+        version: 1,
+        storeName: 'keyval',
+        dbInstance: null,
+        init() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(this.name, this.version);
+                req.onupgradeneeded = (e) => {
+                    const database = e.target.result;
+                    if (!database.objectStoreNames.contains(this.storeName)) {
+                        database.createObjectStore(this.storeName);
+                    }
+                };
+                req.onsuccess = (e) => {
+                    this.dbInstance = e.target.result;
+                    resolve();
+                };
+                req.onerror = (e) => reject(e.target.error);
+            });
+        },
+        get(key) {
+            return new Promise((resolve, reject) => {
+                const tx = this.dbInstance.transaction(this.storeName, 'readonly');
+                const store = tx.objectStore(this.storeName);
+                const req = store.get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        },
+        set(key, val) {
+            return new Promise((resolve, reject) => {
+                const tx = this.dbInstance.transaction(this.storeName, 'readwrite');
+                const store = tx.objectStore(this.storeName);
+                const req = store.put(val, key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        },
+        remove(key) {
+            return new Promise((resolve, reject) => {
+                const tx = this.dbInstance.transaction(this.storeName, 'readwrite');
+                const store = tx.objectStore(this.storeName);
+                const req = store.delete(key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+    };
+
     // ── DOM References ──
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
@@ -150,7 +201,9 @@
     }
 
     // ── Trip Management ──
-    function loadAllTrips() {
+    async function loadAllTrips() {
+        await db.init();
+
         // Migration from old single-trip system
         const oldTrip = localStorage.getItem('gezi-current-trip');
         if (oldTrip) {
@@ -165,20 +218,32 @@
             }
         }
 
-        const savedTrips = localStorage.getItem('gezi-trips');
-        if (savedTrips) {
+        // Migration from localStorage to IndexedDB
+        const savedTripsStr = localStorage.getItem('gezi-trips');
+        if (savedTripsStr) {
             try {
-                state.trips = JSON.parse(savedTrips);
-            } catch {
-                state.trips = [];
-            }
+                const parsed = JSON.parse(savedTripsStr);
+                await db.set('gezi-trips', parsed);
+                const activeIdStr = localStorage.getItem('gezi-active-trip-id');
+                if (activeIdStr) {
+                    await db.set('gezi-active-trip-id', activeIdStr);
+                }
+                localStorage.removeItem('gezi-trips');
+                localStorage.removeItem('gezi-active-trip-id');
+                console.log('Migrated data from localStorage to IndexedDB');
+            } catch(e) { console.error('Migration failed', e); }
+        }
+
+        const savedTrips = await db.get('gezi-trips');
+        if (savedTrips) {
+            state.trips = savedTrips;
         } else {
             state.trips = [];
         }
 
         renderTripsList();
 
-        const activeId = localStorage.getItem('gezi-active-trip-id');
+        const activeId = await db.get('gezi-active-trip-id');
         if (activeId) {
             const found = state.trips.find(t => t.id === activeId);
             if (found) {
@@ -186,7 +251,7 @@
                 state.trip = found;
                 showTripActive();
             } else {
-                localStorage.removeItem('gezi-active-trip-id');
+                await db.remove('gezi-active-trip-id');
                 showTripSetup();
             }
         } else {
@@ -221,36 +286,32 @@
         }).join('');
     }
 
-    function saveTrips() {
+    async function saveTrips() {
         try {
-            localStorage.setItem('gezi-trips', JSON.stringify(state.trips));
+            await db.set('gezi-trips', state.trips);
             if (state.activeTripId) {
-                localStorage.setItem('gezi-active-trip-id', state.activeTripId);
+                await db.set('gezi-active-trip-id', state.activeTripId);
             } else {
-                localStorage.removeItem('gezi-active-trip-id');
+                await db.remove('gezi-active-trip-id');
             }
         } catch (err) {
-            console.error('Storage quota error:', err);
-            if (err.name === 'QuotaExceededError' || err.code === 22 || err.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-                showToast('HATA: Tarayıcı hafızası doldu! (Max 5MB). Lütfen eski gezileri veya medyaları silin.', 'error');
-            } else {
-                showToast('HATA: Gezi verisi kaydedilemedi.', 'error');
-            }
+            console.error('Storage error:', err);
+            showToast('HATA: Gezi verisi kaydedilemedi.', 'error');
             throw err;
         }
     }
 
-    function resumeTrip(id) {
+    async function resumeTrip(id) {
         const found = state.trips.find(t => t.id === id);
         if (found) {
             state.activeTripId = id;
             state.trip = found;
-            saveTrips();
+            await saveTrips();
             showTripActive();
         }
     }
 
-    function deleteTrip(id) {
+    async function deleteTrip(id) {
         if (!confirm('Bu geziyi ve içindeki tüm notları silmek istediğinize emin misiniz? Bu işlem geri alınamaz!')) return;
         state.trips = state.trips.filter(t => t.id !== id);
         if (state.activeTripId === id) {
@@ -258,12 +319,12 @@
             state.trip = null;
             showTripSetup();
         }
-        saveTrips();
+        await saveTrips();
         renderTripsList();
         showToast('Gezi silindi', 'info');
     }
 
-    function startTrip() {
+    async function startTrip() {
         const name = dom.tripNameInput.value.trim();
         if (!name) {
             showToast('Lütfen gezi adı girin', 'error');
@@ -280,30 +341,30 @@
         state.activeTripId = newTrip.id;
         state.trip = newTrip;
         
-        saveTrips();
+        await saveTrips();
         showTripActive();
         dom.tripNameInput.value = '';
         showToast('Gezi başlatıldı! İyi yolculuklar 🧳', 'success');
     }
 
-    function endTrip() {
+    async function endTrip() {
         if (!state.trip) return;
         state.trip.endDate = new Date().toISOString();
         state.activeTripId = null; // Deactivate
         state.trip = null;
-        saveTrips();
+        await saveTrips();
         showTripSetup();
         renderTripsList();
         showToast('Gezi kapatıldı!', 'success');
     }
 
-    function editTripName() {
+    async function editTripName() {
         if (!state.trip) return;
         const newName = prompt('Gezi adını düzenleyin:', state.trip.name);
         if (newName !== null && newName.trim() !== '') {
             state.trip.name = newName.trim();
             dom.activeTripName.textContent = state.trip.name;
-            saveTrips();
+            await saveTrips();
             renderTripsList();
             showToast('Gezi adı güncellendi', 'success');
         }
@@ -318,7 +379,7 @@
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
             try {
                 const data = JSON.parse(ev.target.result);
                 if (!data.tripName || !data.entries) {
@@ -335,7 +396,7 @@
                 };
                 
                 state.trips.unshift(newTrip);
-                saveTrips();
+                await saveTrips();
                 renderTripsList();
                 showToast('Gezi başarıyla içe aktarıldı ✓', 'success');
             } catch (err) {
@@ -421,7 +482,17 @@
         let stream;
         try {
             dom.voiceStatus.textContent = 'Mikrofon izni isteniyor...';
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // Android'deki cızırtıyı ve ses bozulmalarını önlemek için tarayıcının varsayılan
+            // ses işleme özelliklerini (yankı engelleme, gürültü azaltma, otomatik kazanç) kapatıyoruz.
+            stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                    channelCount: 1, // Mono kayıt
+                    sampleRate: 44100
+                }
+            });
         } catch (err) {
             console.error('Microphone permission denied:', err);
             showToast('Mikrofon izni verilmedi. Lütfen izin verin.', 'error');
@@ -444,7 +515,8 @@
         state.audioDataUrl = null;
 
         try {
-            const options = mimeType ? { mimeType } : {};
+            // Ses kalitesini artırmak için bitrate değerini yükseltiyoruz (128 kbps)
+            const options = mimeType ? { mimeType, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 };
             state.mediaRecorder = new MediaRecorder(stream, options);
         } catch (err) {
             console.error('MediaRecorder error:', err);
@@ -526,7 +598,7 @@
         }
     }
 
-    function saveVoiceNote() {
+    async function saveVoiceNote() {
         if (!state.audioDataUrl) {
             showToast('Ses kaydı bulunamadı', 'error');
             return;
@@ -553,7 +625,7 @@
             mimeType: mime,
         };
 
-        const added = addEntry('voice', noteText, [mediaItem]);
+        const added = await addEntry('voice', noteText, [mediaItem]);
         if (added) {
             closePanel('voice-panel');
             showToast(`Sesli not kaydedildi (${formatTime(duration)}) ✓`, 'success');
@@ -561,14 +633,14 @@
     }
 
     // ── Text Note ──
-    function saveTextNote() {
+    async function saveTextNote() {
         const text = dom.textNoteInput.value.trim();
         if (!text) {
             showToast('Lütfen not yazın', 'error');
             dom.textNoteInput.focus();
             return;
         }
-        const added = addEntry('text', text);
+        const added = await addEntry('text', text);
         if (added) {
             dom.textNoteInput.value = '';
             closePanel('text-panel');
@@ -577,7 +649,7 @@
     }
 
     // ── Entry Management ──
-    function addEntry(type, text, media = []) {
+    async function addEntry(type, text, media = []) {
         const entry = {
             id: 'entry_' + Date.now(),
             timestamp: new Date().toISOString(),
@@ -588,7 +660,7 @@
         };
         state.trip.entries.unshift(entry); // newest first
         try {
-            saveTrips();
+            await saveTrips();
             updateStats();
             renderNotes();
             return entry;
@@ -599,10 +671,10 @@
         }
     }
 
-    function deleteEntry(entryId) {
+    async function deleteEntry(entryId) {
         if (!confirm('Bu notu silmek istediğinize emin misiniz?')) return;
         state.trip.entries = state.trip.entries.filter(e => e.id !== entryId);
-        saveTrips();
+        await saveTrips();
         updateStats();
         renderNotes();
         showToast('Not silindi', 'info');
@@ -859,9 +931,9 @@
     };
 
     // ── Init ──
-    function init() {
+    async function init() {
         initTheme();
-        loadAllTrips();
+        await loadAllTrips();
         bindEvents();
     }
 
